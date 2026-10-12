@@ -518,3 +518,61 @@ To speed up processing:
 - Increase `--batch_size` (if memory permits)
 - Use SSD storage for temporary files
 
+---
+
+## TAHMO African Weather Station Pipeline
+
+For regional fine-tuning of ESFM with African weather stations (TAHMO):
+
+### Overview
+- **Raw Data**: 5-minute multi-sensor Zarr store (`tahmo_lazy.zarr`).
+- **Spatial Gridding**: Augmented 12.8k grid (`augmented_station_grid_90x180.npz`) combining 11k global + 925 African stations.
+- **Quality Control**: 4-stage SwissClim QC (physical range gating, collocated multi-sensor fusion, +/-15 min temporal snapping, barometric MSL and Magnus-Tetens dew point derivations).
+
+### Pipeline Execution via `run_pipeline.sh` (Recommended)
+
+You can run the end-to-end TAHMO pipeline using the unified `./run_pipeline.sh` script:
+
+```bash
+# Run the complete TAHMO pipeline (Augment -> Build Train & Holdout -> Verify)
+./run_pipeline.sh --tahmo
+
+# Build only training split
+./run_pipeline.sh --tahmo --split train
+
+# Build only holdout split
+./run_pipeline.sh --tahmo --split holdout
+
+# Skip grid augmentation if already generated in data/
+./run_pipeline.sh --tahmo --skip-augment
+
+# Custom batch size or config
+./run_pipeline.sh --tahmo --batch-size 100 --config config/tahmo_config.json
+```
+
+Or submit as a batch job on CSCS Alps/Daint via SLURM:
+```bash
+sbatch submit_tahmo_pipeline.sbatch
+```
+
+### Manual Individual Step Execution
+```bash
+# 1. Augment spatial grid and generate mapping (Algorithm 1)
+python3 scripts/TAHMO/02_00_augment_tahmo.py \
+    --meta_11k data/meta_info.json \
+    --zarr_path /users/tligawa/ritom_scratch/ai-4-weather/data/tahmo_lazy.zarr \
+    --out_dir data/
+
+# 2. Build training & validation dataset
+python3 scripts/TAHMO/02_build_tahmo_dataset.py --split train
+
+# 3. Build holdout test dataset
+python3 scripts/TAHMO/02_build_tahmo_dataset.py --split holdout
+
+# 4. Verify dataset compliance and physical distributions
+python3 scripts/TAHMO/verify_tahmo_dataset.py \
+    --data_npy /ritom/scratch/cscs/tligawa/ai-4-weather/data/TAHMO/tahmo_training_data.npy \
+    --meta_npz /ritom/scratch/cscs/tligawa/ai-4-weather/data/TAHMO/tahmo_training_meta.npz
+```
+
+

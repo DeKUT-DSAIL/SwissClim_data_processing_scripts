@@ -23,12 +23,13 @@ import numpy as np
 from pathlib import Path
 
 
-def split_dataset(data_npy, meta_npz, holdout_mask_npz, out_dir):
+def split_dataset(data_npy, meta_npz, holdout_mask_npz, out_dir, out_prefix="stations_11k"):
     print("=" * 80)
     print("SPLITTING DATASET INTO TRAINING AND HOLDOUT")
     print("=" * 80)
 
     out_dir = Path(out_dir)
+    out_dir.mkdir(parents=True, exist_ok=True)
 
     print(f"\nInput files:")
     print(f"  Data:         {data_npy}")
@@ -41,12 +42,7 @@ def split_dataset(data_npy, meta_npz, holdout_mask_npz, out_dir):
     mask_data = np.load(holdout_mask_npz)
     holdout_mask = mask_data['holdout_mask']  # [90, 180]
     training_mask = ~holdout_mask
-
-    n_holdout = np.sum(holdout_mask)
-    n_training = np.sum(training_mask)
-
-    print(f"  Holdout stations:  {n_holdout}")
-    print(f"  Training stations: {n_training}")
+    n_holdout = int(np.sum(holdout_mask))
 
     # Load metadata
     print("\nLoading metadata...")
@@ -59,9 +55,16 @@ def split_dataset(data_npy, meta_npz, holdout_mask_npz, out_dir):
     locations = meta['locations']
     scales = meta['scales']
 
-    print(f"  Timestamps: {len(timestamps)}")
-    print(f"  Variables:  {len(variables)}")
-    print(f"  Mapping:    {len(mapping)} stations")
+    n_total_stations = len(mapping)
+    n_training_stations = n_total_stations - n_holdout
+    n_training = n_training_stations
+
+    print(f"  Timestamps:        {len(timestamps):,}")
+    print(f"  Variables:         {len(variables)}")
+    print(f"  Total stations:    {n_total_stations}")
+    print(f"  Holdout stations:  {n_holdout}")
+    print(f"  Training stations: {n_training_stations}")
+    print(f"  Empty canvas cells:{holdout_mask.size - n_total_stations} (out of {holdout_mask.size})")
 
     # Load data (use memory mapping for efficiency)
     print("\nLoading data (memory-mapped)...")
@@ -71,7 +74,21 @@ def split_dataset(data_npy, meta_npz, holdout_mask_npz, out_dir):
     print(f"  Data shape: {data.shape}")
     print(f"  Data size:  {data.nbytes / 1e9:.2f} GB")
 
-    # Create holdout data (keep same shape, mask training stations with NaN)
+    import gc
+
+    # Determine paths
+    if out_prefix == "tahmo":
+        holdout_data_path = out_dir / 'tahmo_holdout_data.npy'
+        holdout_meta_path = out_dir / 'tahmo_holdout_meta.npz'
+        training_data_path = out_dir / 'tahmo_training_data.npy'
+        training_meta_path = out_dir / 'tahmo_training_meta.npz'
+    else:
+        holdout_data_path = out_dir / f'{out_prefix}_data_holdout.npy'
+        holdout_meta_path = out_dir / f'{out_prefix}_meta_holdout.npz'
+        training_data_path = out_dir / f'{out_prefix}_data_training.npy'
+        training_meta_path = out_dir / f'{out_prefix}_meta_training.npz'
+
+    # 1. Create and save holdout data (keep same shape, mask training stations with NaN)
     print("\nCreating holdout data...")
     print("  Keeping spatial structure [T, V, 90, 180]")
     print("  Setting training stations to NaN")
@@ -81,21 +98,6 @@ def split_dataset(data_npy, meta_npz, holdout_mask_npz, out_dir):
     print(f"  Holdout data shape: {holdout_data.shape}")
     print(f"  Holdout data size:  {holdout_data.nbytes / 1e9:.2f} GB")
     print(f"  Valid stations:     {n_holdout} (rest are NaN)")
-
-    # Create training data (keep same shape, mask holdout stations with NaN)
-    print("\nCreating training data...")
-    print("  Keeping spatial structure [T, V, 90, 180]")
-    print("  Setting holdout stations to NaN")
-    training_data = data.copy()  # Make a full copy
-    training_data[:, :, holdout_mask] = np.nan  # Mask out holdout stations
-
-    print(f"  Training data shape: {training_data.shape}")
-    print(f"  Training data size:  {training_data.nbytes / 1e9:.2f} GB")
-    print(f"  Valid stations:      {n_training} (rest are NaN)")
-
-    # Save holdout dataset
-    holdout_data_path = out_dir / 'stations_11k_data_holdout.npy'
-    holdout_meta_path = out_dir / 'stations_11k_meta_holdout.npz'
 
     print(f"\nSaving holdout dataset...")
     print(f"  Saving data to {holdout_data_path}...")
@@ -114,9 +116,19 @@ def split_dataset(data_npy, meta_npz, holdout_mask_npz, out_dir):
         holdout_mask=holdout_mask,  # Include mask to know which stations are valid
     )
 
-    # Save training dataset
-    training_data_path = out_dir / 'stations_11k_data_training.npy'
-    training_meta_path = out_dir / 'stations_11k_meta_training.npz'
+    del holdout_data
+    gc.collect()
+
+    # 2. Create and save training data (keep same shape, mask holdout stations with NaN)
+    print("\nCreating training data...")
+    print("  Keeping spatial structure [T, V, 90, 180]")
+    print("  Setting holdout stations to NaN")
+    training_data = data.copy()  # Make a full copy
+    training_data[:, :, holdout_mask] = np.nan  # Mask out holdout stations
+
+    print(f"  Training data shape: {training_data.shape}")
+    print(f"  Training data size:  {training_data.nbytes / 1e9:.2f} GB")
+    print(f"  Valid stations:      {n_training} (rest are NaN)")
 
     print(f"\nSaving training dataset...")
     print(f"  Saving data to {training_data_path}...")
@@ -135,31 +147,39 @@ def split_dataset(data_npy, meta_npz, holdout_mask_npz, out_dir):
         training_mask=training_mask,  # Include mask to know which stations are valid
     )
 
+    del training_data
+    gc.collect()
+
     # Print summary
+    data_shape = data.shape
+    data_gb = data.nbytes / 1e9
+    n_total_stations = len(mapping)
+    real_training_stations = n_total_stations - n_holdout
+
     print("\n" + "=" * 80)
     print("SUMMARY")
     print("=" * 80)
 
     print(f"\nOriginal dataset:")
-    print(f"  Data:        {data.shape} ({data.nbytes / 1e9:.2f} GB)")
-    print(f"  Stations:    {len(mapping)}")
+    print(f"  Data shape:  {data_shape} ({data_gb:.2f} GB)")
+    print(f"  Total stations: {n_total_stations}")
 
     print(f"\nHoldout dataset:")
-    print(f"  Data:        {holdout_data.shape} ({holdout_data.nbytes / 1e9:.2f} GB)")
-    print(f"  Valid stations: {n_holdout} (others are NaN)")
+    print(f"  Data shape:  {data_shape} ({data_gb:.2f} GB)")
+    print(f"  Valid holdout stations: {n_holdout} (all other cells are NaN)")
     print(f"  Files:")
     print(f"    - {holdout_data_path}")
     print(f"    - {holdout_meta_path}")
 
     print(f"\nTraining dataset:")
-    print(f"  Data:        {training_data.shape} ({training_data.nbytes / 1e9:.2f} GB)")
-    print(f"  Valid stations: {n_training} (others are NaN)")
+    print(f"  Data shape:  {data_shape} ({data_gb:.2f} GB)")
+    print(f"  Valid training stations: {real_training_stations} (holdout & empty cells are NaN)")
     print(f"  Files:")
     print(f"    - {training_data_path}")
     print(f"    - {training_meta_path}")
 
     print(f"\nNote:")
-    print(f"  Both datasets have the same shape and keep the spatial structure.")
+    print(f"  Both datasets keep the 2D irregular canvas shape ({data_shape[2]}, {data_shape[3]}).")
     print(f"  Holdout data has training stations masked as NaN.")
     print(f"  Training data has holdout stations masked as NaN.")
 
@@ -212,6 +232,8 @@ if __name__ == "__main__":
                         help="Holdout mask NPZ file")
     parser.add_argument("--out_dir", required=True,
                         help="Output directory")
+    parser.add_argument("--out_prefix", default="stations_11k",
+                        help="Prefix for output files ('stations_11k' or 'tahmo')")
 
     args = parser.parse_args()
 
@@ -220,4 +242,5 @@ if __name__ == "__main__":
         meta_npz=args.meta_npz,
         holdout_mask_npz=args.holdout_mask,
         out_dir=args.out_dir,
+        out_prefix=args.out_prefix,
     )

@@ -82,27 +82,39 @@ def convert_to_hybrid_format(input_npz: str, output_data_npy: str, output_meta_n
 
 
 if __name__ == "__main__":
-    # Input and output paths
-    input_npz = "weather_data_all.npz"
-    output_data_npy = "stations_11k_var9_data.npy"
-    output_meta_npz = "stations_11k_var9_meta.npz"
+    import argparse
+    import sys
+
+    parser = argparse.ArgumentParser(description="Convert NPZ file to hybrid NPY+NPZ format.")
+    parser.add_argument("--input_npz", default="weather_data_all.npz", help="Input NPZ file")
+    parser.add_argument("--output_data_npy", default="stations_11k_var9_data.npy", help="Output data NPY file")
+    parser.add_argument("--output_meta_npz", default="stations_11k_var9_meta.npz", help="Output metadata NPZ file")
+    parser.add_argument("--force", "-y", action="store_true", help="Force overwrite without confirmation")
+    args = parser.parse_args()
+
+    input_npz = args.input_npz
+    output_data_npy = args.output_data_npy
+    output_meta_npz = args.output_meta_npz
 
     # Check input exists
     if not os.path.exists(input_npz):
         print(f"❌ Error: Input file not found: {input_npz}")
-        exit(1)
+        sys.exit(1)
 
     # Check if outputs exist
     if os.path.exists(output_data_npy) or os.path.exists(output_meta_npz):
-        print(f"\n⚠️  Warning: Output files already exist:")
-        if os.path.exists(output_data_npy):
-            print(f"   {output_data_npy}")
-        if os.path.exists(output_meta_npz):
-            print(f"   {output_meta_npz}")
-        response = input("\nOverwrite? (y/n): ")
-        if response.lower() != 'y':
-            print("Aborted.")
-            exit(0)
+        if not args.force and sys.stdin.isatty():
+            print(f"\n⚠️  Warning: Output files already exist:")
+            if os.path.exists(output_data_npy):
+                print(f"   {output_data_npy}")
+            if os.path.exists(output_meta_npz):
+                print(f"   {output_meta_npz}")
+            response = input("\nOverwrite? (y/n): ")
+            if response.lower() != 'y':
+                print("Aborted.")
+                sys.exit(0)
+        else:
+            print("Note: Overwriting existing output files (--force enabled or non-interactive environment).")
 
     # Run conversion
     convert_to_hybrid_format(input_npz, output_data_npy, output_meta_npz)

@@ -38,10 +38,11 @@ Example usage in code:
 
 import argparse
 import json
+import os
 import numpy as np
 
 
-def create_holdout_mask(holdout_json, grid_shape=(90, 180), out_npz=None):
+def create_holdout_mask(holdout_json, mapping_json=None, grid_shape=(90, 180), out_npz=None):
     """
     Create a binary mask for hold-out stations.
 
@@ -79,12 +80,28 @@ def create_holdout_mask(holdout_json, grid_shape=(90, 180), out_npz=None):
         holdout_mask[row, col] = True
 
     n_holdout = np.sum(holdout_mask)
-    n_training = np.sum(~holdout_mask)
+    total_grid_cells = grid_shape[0] * grid_shape[1]
 
-    print(f"  Hold-out stations: {n_holdout}")
-    print(f"  Training stations: {n_training}")
-    print(f"  Total grid cells:  {grid_shape[0] * grid_shape[1]}")
-    print(f"  Hold-out ratio:    {n_holdout / (n_holdout + n_training) * 100:.2f}%")
+    if mapping_json and os.path.exists(mapping_json):
+        with open(mapping_json, 'r') as f:
+            all_mapping = json.load(f)
+        n_total_stations = len(all_mapping)
+        n_training = n_total_stations - n_holdout
+        n_empty_cells = total_grid_cells - n_total_stations
+
+        print(f"  Total active stations:   {n_total_stations}")
+        print(f"  Hold-out stations:       {n_holdout}")
+        print(f"  True training stations:  {n_training}")
+        print(f"  Empty background cells:  {n_empty_cells}")
+        print(f"  Total grid canvas cells: {total_grid_cells}")
+        print(f"  Hold-out station ratio:  {n_holdout / n_total_stations * 100:.2f}%")
+    else:
+        n_non_holdout_cells = total_grid_cells - n_holdout
+        n_training = n_non_holdout_cells
+        print(f"  Hold-out stations:       {n_holdout}")
+        print(f"  Non-holdout grid cells:  {n_non_holdout_cells} (includes empty canvas cells)")
+        print(f"  Total grid canvas cells: {total_grid_cells}")
+        print(f"  Hold-out canvas ratio:   {n_holdout / total_grid_cells * 100:.2f}%")
 
     # Save mask
     if out_npz:
@@ -192,6 +209,8 @@ if __name__ == "__main__":
                         help="Hold-out mapping JSON file")
     parser.add_argument("--out_npz", required=True,
                         help="Output NPZ file for the mask")
+    parser.add_argument("--mapping_json", default=None,
+                        help="Optional full station mapping JSON to compute true training station counts")
     parser.add_argument("--grid_height", type=int, default=90,
                         help="Grid height (default: 90)")
     parser.add_argument("--grid_width", type=int, default=180,
@@ -201,6 +220,7 @@ if __name__ == "__main__":
 
     create_holdout_mask(
         holdout_json=args.holdout_json,
+        mapping_json=args.mapping_json,
         grid_shape=(args.grid_height, args.grid_width),
         out_npz=args.out_npz,
     )

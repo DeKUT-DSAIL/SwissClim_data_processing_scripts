@@ -1,0 +1,65 @@
+{
+  "collocated_qc": {
+    "input_zarr": "/ritom/scratch/cscs/tligawa/ai-4-weather/data/tahmo_lazy.zarr",
+    "output_zarr": "/ritom/scratch/cscs/tligawa/ai-4-weather/data/tahmo_qc_fused.zarr",
+    "block_steps": 8640,
+    "chunk_t": 288
+  },
+  "augment_grid": {
+    "meta_11k": "data/meta_info.json",
+    "zarr_path": "/ritom/scratch/cscs/tligawa/ai-4-weather/data/tahmo_qc_fused.zarr",
+    "raw_zarr_path": "/ritom/scratch/cscs/tligawa/ai-4-weather/data/tahmo_lazy.zarr",
+    "out_dir": "data",
+    "grid_h": 90,
+    "grid_w": 180,
+    "half": 0.005
+  },
+  "build_yearly": {
+    "zarr_path": "/ritom/scratch/cscs/tligawa/ai-4-weather/data/tahmo_qc_fused.zarr",
+    "raw_zarr_path": "/ritom/scratch/cscs/tligawa/ai-4-weather/data/tahmo_lazy.zarr",
+    "mapping_json": "data/tahmo_station_mapping_90x180.json",
+    "stats_json": "data/weather_data_norm_stats.json",
+    "grid_npz": "data/augmented_station_grid_90x180.npz",
+    "metadata_json": "data/tahmo_african_metadata.json",
+    "out_prefix": "/ritom/scratch/cscs/tligawa/ai-4-weather/data/TAHMO/weather_data",
+    "pattern": "weather_data_[0-9][0-9][0-9][0-9].npz",
+    "time_threshold": 15,
+    "batch_size": 200,
+    "start_year": 2015,
+    "end_year": 2026,
+    "start_date": "2015-01-01T00:00:00",
+    "end_date": "2026-08-31T23:59:59",
+    "use_memmap": false
+  },
+  "merge_yearly": {
+    "input_pattern": "/ritom/scratch/cscs/tligawa/ai-4-weather/data/TAHMO/weather_data_[0-9][0-9][0-9][0-9].npz",
+    "output_file": "/ritom/scratch/cscs/tligawa/ai-4-weather/data/TAHMO/weather_data_all.npz"
+  },
+  "convert_hybrid": {
+    "input_npz": "/ritom/scratch/cscs/tligawa/ai-4-weather/data/TAHMO/weather_data_all.npz",
+    "output_data_npy": "/ritom/scratch/cscs/tligawa/ai-4-weather/data/TAHMO/tahmo_stations_var9_data.npy",
+    "output_meta_npz": "/ritom/scratch/cscs/tligawa/ai-4-weather/data/TAHMO/tahmo_stations_var9_meta.npz"
+  },
+  "select_holdout": {
+    "mapping_json": "data/tahmo_station_mapping_90x180.json",
+    "n_holdout": 150,
+    "n_regions": 10,
+    "min_coverage": 40.0,
+    "out_json": "data/tahmo_holdout_mapping_90x180.json",
+    "sampling_method": "uniform",
+    "random_state": 42
+  },
+  "create_mask": {
+    "holdout_json": "data/tahmo_holdout_mapping_90x180.json",
+    "out_npz": "/ritom/scratch/cscs/tligawa/ai-4-weather/data/TAHMO/holdout_mask.npz",
+    "grid_h": 90,
+    "grid_w": 180
+  },
+  "split_dataset": {
+    "data_npy": "/ritom/scratch/cscs/tligawa/ai-4-weather/data/TAHMO/tahmo_stations_var9_data.npy",
+    "meta_npz": "/ritom/scratch/cscs/tligawa/ai-4-weather/data/TAHMO/tahmo_stations_var9_meta.npz",
+    "holdout_mask": "/ritom/scratch/cscs/tligawa/ai-4-weather/data/TAHMO/holdout_mask.npz",
+    "out_dir": "/ritom/scratch/cscs/tligawa/ai-4-weather/data/TAHMO",
+    "out_prefix": "tahmo"
+  }
+}

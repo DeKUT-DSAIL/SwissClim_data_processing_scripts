@@ -78,7 +78,21 @@ def merge_yearly_npz(input_pattern, out_file):
     if not files:
         raise FileNotFoundError(f"No NPZ files matching pattern: {input_pattern}")
 
-    files_with_year = [(f, extract_year(f)) for f in files]
+    # Exclude output file if it happens to match the input pattern (e.g. weather_data_all.npz)
+    out_file_abs = os.path.abspath(out_file)
+    files = [f for f in files if os.path.abspath(f) != out_file_abs]
+
+    files_with_year = []
+    for f in files:
+        try:
+            y = extract_year(f)
+            files_with_year.append((f, y))
+        except ValueError:
+            print(f"  Skipping non-yearly NPZ file: {f}")
+
+    if not files_with_year:
+        raise ValueError(f"No valid yearly NPZ files found matching pattern: {input_pattern}")
+
     files_with_year.sort(key=lambda x: x[1])
 
     print("\nFiles to merge (in order):")
@@ -164,7 +178,8 @@ def merge_yearly_npz(input_pattern, out_file):
     # ------------------------------------------------------------------
     print("\nAllocating big arrays...")
 
-    tmp_data_file = tempfile.NamedTemporaryFile(delete=False, suffix=".dat")
+    out_dir = os.path.dirname(out_file)
+    tmp_data_file = tempfile.NamedTemporaryFile(delete=False, suffix=".dat", dir=out_dir if out_dir else None)
     tmp_data_file.close()
     print(f"  Using memmap for data at: {tmp_data_file.name}")
 
@@ -194,20 +209,16 @@ def merge_yearly_npz(input_pattern, out_file):
 
         offset += T
 
+    big_data.flush()
+
     # ------------------------------------------------------------------
     # 5. Save merged NPZ
     # ------------------------------------------------------------------
     print(f"\nSaving merged NPZ to {out_file}...")
 
-    # Convert memmap to regular ndarray for saving
-    big_data_arr = np.array(big_data)
-    # Drop the memmap file
-    del big_data
-    os.unlink(tmp_data_file.name)
-
     np.savez_compressed(
         out_file,
-        data=big_data_arr,
+        data=big_data,
         timestamps=big_timestamps,
         variables=base_meta["variables"],
         mapping=base_meta["mapping"],
@@ -217,8 +228,14 @@ def merge_yearly_npz(input_pattern, out_file):
         scales=base_meta["scales"],
     )
 
+    # Clean up memmap file
+    data_shape = big_data.shape
+    del big_data
+    if os.path.exists(tmp_data_file.name):
+        os.unlink(tmp_data_file.name)
+
     print("\n✅ DONE!")
-    print(f"  Merged data shape: {big_data_arr.shape}")
+    print(f"  Merged data shape: {data_shape}")
     print(f"  Total timesteps:   {total_T}")
     print(f"  Output file:       {out_file}")
     print("=" * 80)

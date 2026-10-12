@@ -25,15 +25,15 @@ from pathlib import Path
 from sklearn.cluster import KMeans
 
 
-def uniform_geographic_sampling(df, n_samples, min_coverage, random_state=42):
+def uniform_geographic_sampling(df, n_samples, min_coverage, random_state=42, n_regions=None):
     """
     Select stations with UNIFORM geographic distribution.
 
     Strategy:
     1. Filter stations by minimum coverage threshold
-    2. Divide the world into geographic regions using K-means clustering
+    2. Divide the region into geographic zones using K-means clustering
     3. Sample EQUALLY from each region (not proportionally)
-    4. This ensures even spatial distribution across the globe
+    4. This ensures even spatial distribution across the domain
 
     Returns:
         DataFrame with selected stations
@@ -51,18 +51,17 @@ def uniform_geographic_sampling(df, n_samples, min_coverage, random_state=42):
         print(f"\n⚠️  WARNING: Only {len(df_filtered)} stations meet coverage threshold.")
         print(f"   Requested {n_samples} samples. Lowering coverage threshold...")
 
-        # Find the coverage threshold that gives us at least n_samples stations
         df_sorted = df.sort_values('all_var_valid_mean_pct', ascending=False)
         new_threshold = df_sorted.iloc[n_samples - 1]['all_var_valid_mean_pct']
         print(f"   New threshold: {new_threshold:.1f}%")
         df_filtered = df[df['all_var_valid_mean_pct'] >= new_threshold].copy()
         print(f"   Stations after adjustment: {len(df_filtered):,}")
 
-    # Step 2: Determine number of regions to ensure even distribution
-    # We want each region to have at least a few stations to choose from
-    n_regions = min(n_samples // 2, len(df_filtered) // 10)  # At least 10 stations per region
-    n_regions = max(n_regions, 50)  # At least 50 regions for global coverage
-    n_regions = min(n_regions, n_samples)  # Can't have more regions than samples
+    # Step 2: Determine number of regions
+    if n_regions is None or n_regions <= 0:
+        # Default adaptive formula
+        n_regions = max(5, min(n_samples // 2, len(df_filtered) // 10))
+    n_regions = min(n_regions, n_samples, len(df_filtered))
 
     print(f"\n2. Clustering into {n_regions} geographic regions using K-means")
 
@@ -310,7 +309,7 @@ def geographic_stratified_sampling(df, n_samples, min_coverage, random_state=42)
     return result_df
 
 
-def main(coverage_csv, mapping_json, n_holdout, min_coverage, out_json, random_state=42, sampling_method='stratified'):
+def main(coverage_csv, mapping_json, n_holdout, min_coverage, out_json, random_state=42, sampling_method='stratified', n_regions=None):
     print("=" * 80)
     print("SELECTING HOLD-OUT STATIONS")
     print("=" * 80)
@@ -322,11 +321,31 @@ def main(coverage_csv, mapping_json, n_holdout, min_coverage, out_json, random_s
     print(f"  Output JSON:      {out_json}")
     print(f"  Random state:     {random_state}")
     print(f"  Sampling method:  {sampling_method}")
+    if n_regions:
+        print(f"  N regions:        {n_regions}")
 
     # Load coverage data
-    print("\nLoading coverage data...")
-    coverage_df = pd.read_csv(coverage_csv)
-    print(f"  Loaded {len(coverage_df)} stations")
+    import os
+    if coverage_csv and os.path.exists(coverage_csv):
+        print(f"\nLoading coverage data from {coverage_csv}...")
+        coverage_df = pd.read_csv(coverage_csv)
+        print(f"  Loaded {len(coverage_df)} stations")
+    else:
+        print(f"\nNo coverage CSV provided or found. Deriving candidate station list from mapping JSON: {mapping_json}...")
+        with open(mapping_json, 'r') as f:
+            mapping_raw = json.load(f)
+        records = []
+        for sid, d in mapping_raw.items():
+            records.append({
+                'station_id': sid,
+                'row': d.get('row', -1),
+                'col': d.get('col', -1),
+                'lat_orig': d.get('lat_orig', np.nan),
+                'lon_orig': d.get('lon_orig', np.nan),
+                'all_var_valid_mean_pct': 100.0,
+            })
+        coverage_df = pd.DataFrame(records)
+        print(f"  Loaded {len(coverage_df)} stations from mapping JSON (defaulting coverage to 100%)")
 
     # Select hold-out stations
     if sampling_method == 'random':
@@ -341,7 +360,8 @@ def main(coverage_csv, mapping_json, n_holdout, min_coverage, out_json, random_s
             coverage_df,
             n_samples=n_holdout,
             min_coverage=min_coverage,
-            random_state=random_state
+            random_state=random_state,
+            n_regions=n_regions,
         )
     else:
         holdout_df = geographic_stratified_sampling(
@@ -367,10 +387,14 @@ def main(coverage_csv, mapping_json, n_holdout, min_coverage, out_json, random_s
 
     print(f"  Hold-out mapping contains {len(holdout_mapping)} stations")
 
-    # Save hold-out mapping
+    # Save hold-out mapping atomically
     print(f"\nSaving hold-out mapping to {out_json}...")
-    with open(out_json, 'w') as f:
+    import tempfile
+    import os
+    tmp_path = f"{out_json}.tmp"
+    with open(tmp_path, 'w') as f:
         json.dump(holdout_mapping, f, indent=2)
+    os.replace(tmp_path, out_json)
 
     # Print statistics
     print("\n" + "=" * 80)
@@ -396,11 +420,15 @@ def main(coverage_csv, mapping_json, n_holdout, min_coverage, out_json, random_s
     print(f"  Northern: {n_north} ({n_north/len(holdout_df)*100:.1f}%)")
     print(f"  Southern: {n_south} ({n_south/len(holdout_df)*100:.1f}%)")
 
+    # Enrich holdout_df with mapping metadata if row or col are missing
+    if 'row' not in holdout_df.columns or 'col' not in holdout_df.columns:
+        holdout_df['row'] = [mapping_data.get(sid, {}).get('row', -1) for sid in holdout_df['station_id']]
+        holdout_df['col'] = [mapping_data.get(sid, {}).get('col', -1) for sid in holdout_df['station_id']]
+
     # Save hold-out station list for reference
     holdout_list_csv = out_json.replace('.json', '_list.csv')
-    holdout_df[['station_id', 'row', 'col', 'lat_orig', 'lon_orig', 'all_var_valid_mean_pct']].to_csv(
-        holdout_list_csv, index=False
-    )
+    cols_to_save = [c for c in ['station_id', 'row', 'col', 'lat_orig', 'lon_orig', 'all_var_valid_mean_pct'] if c in holdout_df.columns]
+    holdout_df[cols_to_save].to_csv(holdout_list_csv, index=False)
     print(f"\n✅ Saved hold-out station list to {holdout_list_csv}")
 
     print("\n" + "=" * 80)
@@ -412,8 +440,8 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(
         description="Select hold-out stations with high coverage and geographic distribution."
     )
-    parser.add_argument("--coverage_csv", required=True,
-                        help="Station coverage CSV file")
+    parser.add_argument("--coverage_csv", required=False, default=None,
+                        help="Station coverage CSV file (optional; defaults to mapping_json if omitted)")
     parser.add_argument("--mapping_json", required=True,
                         help="Original station mapping JSON file")
     parser.add_argument("--n_holdout", type=int, default=500,
@@ -422,11 +450,13 @@ if __name__ == "__main__":
                         help="Minimum coverage percentage threshold")
     parser.add_argument("--out_json", required=True,
                         help="Output JSON file for hold-out mapping")
-    parser.add_argument("--random_state", type=int, default=42,
-                        help="Random state for reproducibility")
     parser.add_argument("--sampling_method", type=str, default='stratified',
                         choices=['random', 'stratified', 'uniform'],
                         help="Sampling method: 'random' for simple random sampling, 'stratified' for proportional geographic stratification, 'uniform' for equal sampling across geographic regions")
+    parser.add_argument("--random_state", type=int, default=42,
+                        help="Random state for reproducibility")
+    parser.add_argument("--n_regions", type=int, default=None,
+                        help="Number of geographic clusters/regions for K-Means (optional; defaults to adaptive count)")
 
     args = parser.parse_args()
 
@@ -438,4 +468,5 @@ if __name__ == "__main__":
         out_json=args.out_json,
         random_state=args.random_state,
         sampling_method=args.sampling_method,
+        n_regions=args.n_regions,
     )

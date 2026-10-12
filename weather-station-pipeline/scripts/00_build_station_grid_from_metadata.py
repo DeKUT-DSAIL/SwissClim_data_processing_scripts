@@ -34,7 +34,6 @@ Usage:
   python build_station_grid_from_metadata.py --input metadata.json --H 180 --W 360 --half 0.005 \
       --out_npz final_results_station_grid.npz --out_json final_results_mapping.json
 """
-from __future__ import annotations
 
 import argparse
 import json
@@ -42,7 +41,6 @@ from pathlib import Path
 from typing import Any, Dict, List, Tuple
 
 import numpy as np
-import torch
 
 
 def wrap_lon_360(lon: float) -> float:
@@ -245,21 +243,16 @@ def main() -> None:
     lon_max = np.maximum(lon_max, np.nextafter(lon_min, np.float32(np.inf))).astype(np.float32)
 
     # validations (your requirements)
-    lat_t = torch.from_numpy(lat)
-    lon_t = torch.from_numpy(lon)
+    assert np.all(lat <= 90.0) and np.all(lat >= -90.0)
+    assert np.all(lon >= 0.0) and np.all(lon < 360.0)
+    assert np.all(lat[1:, :] - lat[:-1, :] < 0)
+    assert np.all(lon[:, 1:] - lon[:, :-1] > 0)
 
-    assert (torch.all(lat_t <= 90) and torch.all(lat_t >= -90))
-    assert (torch.all(lon_t >= 0) and torch.all(lon_t < 360))
-    assert torch.all(lat_t[1:, :] - lat_t[:-1, :] < 0)
-    assert torch.all(lon_t[:, 1:] - lon_t[:, :-1] > 0)
-
-    lat_min_t = torch.from_numpy(lat_min); lat_max_t = torch.from_numpy(lat_max)
-    lon_min_t = torch.from_numpy(lon_min); lon_max_t = torch.from_numpy(lon_max)
-    assert (lat_max_t > lat_min_t).all()
-    assert (lon_max_t > lon_min_t).all()
-    assert (abs(lat_max_t) <= 90.0).all() and (abs(lat_min_t) <= 90.0).all()
-    assert (lon_max_t <= 360.0).all() and (lon_min_t <= 360.0).all()
-    assert (lon_max_t >= 0.0).all() and (lon_min_t >= 0.0).all()
+    assert (lat_max > lat_min).all()
+    assert (lon_max > lon_min).all()
+    assert (np.abs(lat_max) <= 90.0).all() and (np.abs(lat_min) <= 90.0).all()
+    assert (lon_max <= 360.0).all() and (lon_min <= 360.0).all()
+    assert (lon_max >= 0.0).all() and (lon_min >= 0.0).all()
 
     # per-station deltas & finalize mapping
     dlon_max = 0.0
@@ -287,7 +280,11 @@ def main() -> None:
         station_ids=np.array([s[0] for s in stations], dtype=object),
         half=np.array([half], dtype=np.float32),
     )
-    Path(args.out_json).write_text(json.dumps(mapping))
+    out_json_path = Path(args.out_json)
+    temp_json_path = out_json_path.with_suffix(".tmp")
+    with open(temp_json_path, "w", encoding="utf-8") as f:
+        json.dump(mapping, f)
+    temp_json_path.replace(out_json_path)
 
     print("✅ Done")
     print(f"Stations: {N}, grid: {H}x{W}, empty cells: {H*W-N}")
