@@ -1,6 +1,5 @@
 # Rationale: Temporal Resolution, Snapping vs. Averaging, and Collocated QC for ESFM
 
-**Author:** SwissClim & TAHMO Data Processing Pipeline  
 **Reference Document:** Earth Surface Foundation Model (ESFM) Paper (Ozdemir et al., 2026), Appendix C.3, Table 17, Table 18, and Section 5.3.2.
 
 ---

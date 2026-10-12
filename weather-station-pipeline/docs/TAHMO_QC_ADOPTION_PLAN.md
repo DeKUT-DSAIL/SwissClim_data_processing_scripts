@@ -1,6 +1,6 @@
 # Implementation Plan: Adopting SwissClim QC Standards for TAHMO Dataset Pipeline
 
-## 1. Goal Description
+## Description
 
 This plan defines the end-to-end strategy for adopting the official **SwissClim Quality Control (QC) standard** (documented in [`weather-station-pipeline/docs/PIPELINE_DETAILS.md`](./PIPELINE_DETAILS.md)) to process raw 5-minute multi-sensor TAHMO observations (`tahmo_lazy.zarr`) into the ML-ready dataset for fine-tuning the ESFM foundation model (`ESFM_s_nm_e11k_lt6h`).
 
@@ -11,7 +11,7 @@ The target datasets will be produced and stored at `/ritom/scratch/cscs/tligawa/
 
 ---
 
-## 2. SwissClim QC Standard: 4-Stage Adoption for TAHMO
+## SwissClim QC Standard: 4-Stage Adoption for TAHMO
 
 ```mermaid
 flowchart TD
@@ -87,7 +87,7 @@ From SwissClim `02_build_station_data_yearly.py`:
 
 ---
 
-## 3. Proposed Code Changes & Location
+## Proposed Code Changes & Location
 
 All files will be implemented inside **`SwissClim_data_processing_scripts/weather-station-pipeline/`**:
 
@@ -109,41 +109,25 @@ SwissClim_data_processing_scripts/weather-station-pipeline/
 
 ### File Details:
 
-#### 1. [NEW] `weather-station-pipeline/config/tahmo_config.json`
+#### `weather-station-pipeline/config/tahmo_config.json`
 Specifies paths to `tahmo_lazy.zarr`, the augmented grid assets, target output directory `/ritom/scratch/cscs/tligawa/ai-4-weather/data/TAHMO/`, and time ranges for training (2018–2023) and holdout (2025–2026).
 
-#### 2. [NEW] `weather-station-pipeline/scripts/tahmo_qc.py`
+#### `weather-station-pipeline/scripts/tahmo_qc.py`
 High-performance NumPy-vectorized module implementing:
 * `apply_range_gates(slot_data, var_name)`
 * `reconcile_collocated_scalars(slot_data, var_name)`
 * `reconcile_collocated_wind(ws_slots, wd_slots)`
 * `derive_9_channels(ap, te, rh, ws, wd, elev, ts)`
 
-#### 3. [NEW] `weather-station-pipeline/scripts/build_tahmo_dataset.py`
+#### `weather-station-pipeline/scripts/build_tahmo_dataset.py`
 Out-of-core chunk streaming engine:
 * Streams 50 stations per batch directly from `tahmo_lazy.zarr`.
 * Applies `tahmo_qc.py` pipeline.
 * Writes into memory-mapped `tahmo_training_data.npy` and `tahmo_holdout_data.npy`.
 * Emits companion `_meta.npz` files with SwissClim normalization stats.
 
-#### 4. [NEW] `weather-station-pipeline/scripts/verify_tahmo_dataset.py`
+#### `weather-station-pipeline/scripts/verify_tahmo_dataset.py`
 Smoke test verifying file sizes, memory-mapping, physical value distributions, NaN fractions, and PyTorch `StationGridNPZ` batch loading.
 
 ---
-
-## 4. Verification Plan
-
-### Automated Tests
-1. **Unit Test Suite (`tests/test_tahmo_qc.py`):**
-   * Range gate truncation on synthetic extremes ($te = 80^\circ\text{C} \rightarrow \text{NaN}$).
-   * Wind vector decomposition and $359^\circ / 1^\circ$ North wrap-around agreement.
-   * Ultrasonic blockage arbitration ($ws = [0.0, 5.2] \rightarrow 5.2\text{ m/s}$).
-   * 15-minute time snapping rejection ($|\Delta t| = 18\text{ min} \rightarrow \text{NaN}$).
-   * Physical check: $dt \le 2t$ everywhere.
-2. **Chunk Execution & Sanity Check:**
-   * Run 1 chunk (50 stations) for 1 month to verify memory usage, I/O streaming speed, and array flushing.
-3. **End-to-End Build & Validation:**
-   * Execute full run producing the training and holdout datasets.
-   * Run `verify_tahmo_dataset.py` ensuring zero assertion failures.
-   * Test-load sample batches using `StationGridNPZ` in `ESFM`.
 
